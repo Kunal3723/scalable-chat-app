@@ -5,7 +5,6 @@ import { InMemorySessionStore } from "./sessionStore.js";
 import crypto from 'crypto';
 import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./types.js";
 import { MessageStore } from "./messageStore.js";
-import { Redis } from "ioredis";
 
 const app = express();
 const server = http.createServer(app);
@@ -14,20 +13,6 @@ const io = new Server(server, {
         allowedHeaders: ['*'],
         origin: "*",
     }
-});
-
-const pub = new Redis({
-    host: 'redis-3ef71560-dtom7628-12a0.a.aivencloud.com',
-    password: 'AVNS_60F23DRcodnrbSyeQ_i',
-    port: 26911,
-    username: 'default'
-});
-
-const sub = new Redis({
-    host: 'redis-3ef71560-dtom7628-12a0.a.aivencloud.com',
-    password: 'AVNS_60F23DRcodnrbSyeQ_i',
-    port: 26911,
-    username: 'default'
 });
 
 const sessionStore = new InMemorySessionStore();
@@ -56,7 +41,7 @@ io.use((socket, next) => {
     next();
 });
 
-io.on(CONNECTION,async (socket) => {
+io.on(CONNECTION, (socket) => {
 
     if (!sessionStore.findSession(socket.sessionID)) {
         sessionStore.saveSession(socket.sessionID, {
@@ -79,18 +64,10 @@ io.on(CONNECTION,async (socket) => {
         }
     }
 
-    // no redis
     socket.emit(SESSION, {
         sessionID: socket.sessionID,
         userID: socket.userID,
     });
-
-    sub.subscribe(PRIVATE_MESSAGE);
-    sub.subscribe(MESSAGE_DELIVERED);
-    sub.subscribe(MESSAGE_SEEN);
-    sub.subscribe(SEND_TYPING_STATUS);
-    sub.subscribe(USER_DISCONNECTED);
-    sub.subscribe(USER_CONNECTED);
 
     socket.join(socket.userID);
 
@@ -103,15 +80,7 @@ io.on(CONNECTION,async (socket) => {
             lastSeen: session.lastSeen
         });
     });
-    // no redis
     socket.emit(USERS, users);
-
-    await pub.publish(USER_CONNECTED, JSON.stringify({
-        userID: socket.userID,
-        username: socket.username,
-        connected: true,
-        lastSeen: Date.now()
-    }))
 
     socket.broadcast.emit(USER_CONNECTED, {
         userID: socket.userID,
@@ -121,32 +90,31 @@ io.on(CONNECTION,async (socket) => {
     });
 
     socket.on(PRIVATE_MESSAGE, async ({ content, to, id, from }) => {
-        //no redis
         socket.emit(MESSAGE_SENT, { messageID: id, to });
         messageStore.addMessage({ id, content, from, to });
-        await pub.publish(PRIVATE_MESSAGE, JSON.stringify({
+        socket.to(to).to(from).emit(PRIVATE_MESSAGE, {
             content,
             from: from,
             to,
             id: id
-        }))
+        });
     });
 
-    socket.on(MESSAGE_DELIVERED, async ({ messageID, to, from }) => {
+    socket.on(MESSAGE_DELIVERED, ({ messageID, to, from }) => {
         messageStore.removeMessage(messageID);
-        await pub.publish(MESSAGE_DELIVERED, JSON.stringify({
+        socket.to(to).to(from).emit(MESSAGE_DELIVERED, {
             messageID, to, from
-        }))
+        });
     })
 
-    socket.on(MESSAGE_SEEN, async ({ messageID, to, from }) => {
-        await pub.publish(MESSAGE_SEEN, JSON.stringify({
+    socket.on(MESSAGE_SEEN, ({ messageID, to, from }) => {
+        socket.to(to).to(from).emit(MESSAGE_SEEN, {
             messageID, to, from
-        }))
+        });
     })
 
-    socket.on(SEND_TYPING_STATUS, async ({ from, to, status }) => {
-        await pub.publish(SEND_TYPING_STATUS, JSON.stringify({ from, to, status }))
+    socket.on(SEND_TYPING_STATUS, ({ from, to, status }) => {
+        socket.to(to).to(from).emit(SEND_TYPING_STATUS, { from, to, status })
     })
 
     socket.on(DISCONNECT, async () => {
@@ -156,44 +124,10 @@ io.on(CONNECTION,async (socket) => {
             sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
             sessionStore.updateSessionlastSeen(socket.userID, Date.now());
             const user = sessionStore.findSession(socket.sessionID);
-            await pub.publish(USER_DISCONNECTED, JSON.stringify({ user }))
-            sub.unsubscribe(PRIVATE_MESSAGE);
-            sub.unsubscribe(MESSAGE_DELIVERED);
-            sub.unsubscribe(MESSAGE_SEEN);
-            sub.unsubscribe(SEND_TYPING_STATUS);
-            sub.unsubscribe(USER_DISCONNECTED);
-            sub.unsubscribe(USER_CONNECTED);
+            socket.broadcast.emit(USER_DISCONNECTED, user);
         }
     });
 });
-
-sub.on('message', async (channel, message) => {
-    if (channel === PRIVATE_MESSAGE) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(PRIVATE_MESSAGE, msg);
-    }
-    else if (channel === MESSAGE_DELIVERED) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(MESSAGE_DELIVERED, msg);
-    }
-    else if (channel === MESSAGE_SEEN) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(MESSAGE_SEEN, msg);
-    }
-    else if (channel === SEND_TYPING_STATUS) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(SEND_TYPING_STATUS, msg);
-    }
-    else if (channel === USER_DISCONNECTED) {
-        const msg = JSON.parse(message);
-        io.emit(USER_DISCONNECTED, msg.user);
-    }
-    else if (channel === USER_CONNECTED) {
-        const msg = JSON.parse(message);
-        if(msg.userID!==io.userID)
-        io.emit(USER_CONNECTED, msg);
-    }
-})
 
 app.get('/', (req, res) => {
     res.send('hello how are you?');
