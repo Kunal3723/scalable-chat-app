@@ -78,12 +78,11 @@ io.on(CONNECTION, async (socket) => {
     else {
         await sessionStore.updateSessionOnlineStatus(socket.sessionID, true);
         await sessionStore.updateSessionlastSeen(socket.sessionID, Date.now());
-        const messages = messageStore.getMessages(socket.userID);
-        if (messages) {
-            messages.forEach((msg) => {
-                console.log(msg);
+        const messages = await messageStore.getMessages(socket.userID);
+        if (messages.length) {
+            messages.forEach(async (msg) => {
                 socket.emit(SEND_ALL_UNSENT_MESSAGES, msg);
-                messageStore.removeMessage(msg.id);
+                await messageStore.removeMessage(socket.userID);
             })
         }
     }
@@ -116,7 +115,7 @@ io.on(CONNECTION, async (socket) => {
 
     socket.on(PRIVATE_MESSAGE, async ({ content, to, id, from }) => {
         socket.emit(MESSAGE_SENT, { messageID: id, to });
-        messageStore.addMessage({ id, content, from, to });
+        await messageStore.addMessage(to, { id, content, from, to });
         socket.to(to).to(from).emit(PRIVATE_MESSAGE, {
             content,
             from: from,
@@ -125,8 +124,8 @@ io.on(CONNECTION, async (socket) => {
         });
     });
 
-    socket.on(MESSAGE_DELIVERED, ({ messageID, to, from }) => {
-        messageStore.removeMessage(messageID);
+    socket.on(MESSAGE_DELIVERED, async ({ messageID, to, from }) => {
+        await messageStore.removeMessage(socket.userID);
         socket.to(to).to(from).emit(MESSAGE_DELIVERED, {
             messageID, to, from
         });
@@ -145,13 +144,10 @@ io.on(CONNECTION, async (socket) => {
     socket.on(DISCONNECT, async () => {
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
-        console.log(isDisconnected);
-        console.log(socket.userID);
         if (isDisconnected) {
             await sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
             await sessionStore.updateSessionlastSeen(socket.userID, Date.now());
             const user = await sessionStore.findSession(socket.sessionID);
-            console.log(user);
             socket.broadcast.emit(USER_DISCONNECTED, user);
         }
     });

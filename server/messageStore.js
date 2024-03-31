@@ -1,30 +1,39 @@
+import { Redis } from "ioredis";
+
+const prefix = 'messages:'
 export class MessageStore {
-    constructor() {
-        this.messages = [];
+    constructor(redisConfig) {
+        this.redis = new Redis(redisConfig);
     }
 
-    // Function to add a message
-    addMessage(message) {
-        this.messages.push(message);
-    }
-
-    // Function to remove a message by its index
-    removeMessage(id) {
-        const index = this.messages.findIndex(message => message.id === id);
-        if (index !== -1) {
-            this.messages.splice(index, 1);
-            return true; // Indicate successful removal
+    async addMessage(userId, message) {
+        try {
+            await this.redis.rpush(prefix+userId, JSON.stringify(message));
+        } catch (error) {
+            console.log("addMessage", error);
         }
-        return false;
     }
 
-    getMessages(id) {
-        const msgs = this.messages.filter((msg) => msg.to === id);
-        return msgs;
+    async removeMessage(userId) {
+        try {
+            await this.redis.lpop(prefix+userId);
+        } catch (error) {
+            console.log("removeMessage", error);
+        }
     }
 
-    // Function to get all messages
-    getAllMessages() {
-        return this.messages;
+    async getMessages(userId) {
+        try {
+            const messages = await this.redis.lrange(prefix+userId, 0, -1);
+            return messages.map(message => JSON.parse(message));
+        } catch (error) {
+            console.log("getMessages ", error);
+            return null;
+        }
+    }
+
+    async isEmpty(userId) {
+        const length = await this.redis.llen(prefix+userId);
+        return length === 0;
     }
 }
