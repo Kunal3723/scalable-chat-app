@@ -1,10 +1,12 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { InMemorySessionStore } from "./sessionStore.js";
+import { RedisSessionStore } from "./sessionStore.js";
 import crypto from 'crypto';
 import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./types.js";
 import { MessageStore } from "./messageStore.js";
+import { Redis } from "ioredis";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 const app = express();
 const server = http.createServer(app);
@@ -15,16 +17,38 @@ const io = new Server(server, {
     }
 });
 
-const sessionStore = new InMemorySessionStore();
+const pub = new Redis();
+const sub = pub.duplicate();
+
+pub.on("error", (err) => {
+    console.log(err.message);
+});
+
+sub.on("error", (err) => {
+    console.log(err.message);
+});
+
+const init = () => {
+    try {
+        io.adapter(createAdapter(pub, sub));
+    } catch (error) {
+        console.log("error 48", error);
+    }
+}
+
+
+init();
+
+const sessionStore = new RedisSessionStore();
 const messageStore = new MessageStore();
 const randomId = () => crypto.randomBytes(8).toString("hex");
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     const { username, sessionID } = socket.handshake.auth;
     if (sessionID) {
         // find existing session
-        const session = sessionStore.findSession(sessionID);
-        if (session) {
+        const session = await sessionStore.findSession(sessionID);
+        if (session.userID) {
             socket.sessionID = sessionID;
             socket.userID = session.userID;
             socket.username = session.username;
@@ -41,10 +65,10 @@ io.use((socket, next) => {
     next();
 });
 
-io.on(CONNECTION, (socket) => {
-
-    if (!sessionStore.findSession(socket.sessionID)) {
-        sessionStore.saveSession(socket.sessionID, {
+io.on(CONNECTION, async (socket) => {
+    const session = await sessionStore.findSession(socket.sessionID);
+    if (!session.userID) {
+        await sessionStore.saveSession(socket.sessionID, {
             userID: socket.userID,
             username: socket.username,
             connected: true,
@@ -52,8 +76,8 @@ io.on(CONNECTION, (socket) => {
         });
     }
     else {
-        sessionStore.updateSessionOnlineStatus(socket.sessionID, true);
-        sessionStore.updateSessionlastSeen(socket.sessionID, Date.now());
+        await sessionStore.updateSessionOnlineStatus(socket.sessionID, true);
+        await sessionStore.updateSessionlastSeen(socket.sessionID, Date.now());
         const messages = messageStore.getMessages(socket.userID);
         if (messages) {
             messages.forEach((msg) => {
@@ -72,7 +96,8 @@ io.on(CONNECTION, (socket) => {
     socket.join(socket.userID);
 
     const users = [];
-    sessionStore.findAllSessions().forEach((session) => {
+    const sessions = await sessionStore.findAllSessions();
+    sessions.forEach((session) => {
         users.push({
             userID: session.userID,
             username: session.username,
@@ -120,10 +145,13 @@ io.on(CONNECTION, (socket) => {
     socket.on(DISCONNECT, async () => {
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
+        console.log(isDisconnected);
+        console.log(socket.userID);
         if (isDisconnected) {
-            sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
-            sessionStore.updateSessionlastSeen(socket.userID, Date.now());
-            const user = sessionStore.findSession(socket.sessionID);
+            await sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
+            await sessionStore.updateSessionlastSeen(socket.userID, Date.now());
+            const user = await sessionStore.findSession(socket.sessionID);
+            console.log(user);
             socket.broadcast.emit(USER_DISCONNECTED, user);
         }
     });
@@ -133,6 +161,6 @@ app.get('/', (req, res) => {
     res.send('hello how are you?');
 })
 
-server.listen(3001, () => {
-    console.log("server started at port " + 3001);
+server.listen(process.env.PORT || 3001, () => {
+    console.log("server started at port " + process.env.PORT || 3001);
 })

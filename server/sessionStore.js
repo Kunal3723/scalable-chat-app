@@ -1,44 +1,72 @@
+import { Redis } from "ioredis";
+
 class SessionStore {
+    // Abstract methods
     findSession(id) { }
     saveSession(id, session) { }
     findAllSessions() { }
 }
-
-export class InMemorySessionStore extends SessionStore {
-    constructor() {
+const prefix = 'session:'
+export class RedisSessionStore extends SessionStore {
+    constructor(redisConfig) {
         super();
-        this.sessions = new Map();
+        this.redis = new Redis(redisConfig);
     }
 
-    findSession(id) {
-        return this.sessions.get(id);
-    }
-
-    saveSession(id, session) {
-        this.sessions.set(id, session);
-    }
-
-    removeSession(id) {
-        this.sessions.delete(id);
-    }
-
-    findAllSessions() {
-        return [...this.sessions.values()];
-    }
-
-    updateSessionOnlineStatus(id, isOnline) {
-        const session = this.findSession(id);
-        if (session) {
-            session.connected = isOnline;
-            this.saveSession(id, session);
+    async findSession(id) {
+        try {
+            const session = await this.redis.hgetall(prefix+id);
+            return session;
+        } catch (error) {
+            console.log("findSession", error);
+            return {};
         }
     }
 
-    updateSessionlastSeen(id, lastSeen) {
-        const session = this.findSession(id);
-        if (session) {
-            session.lastSeen = lastSeen;
-            this.saveSession(id, session);
+    async saveSession(id, session) {
+        try {
+            await this.redis.hmset(prefix+id, session);
+        } catch (error) {
+            console.log("saveSession", error);
+        }
+    }
+
+    async removeSession(id) {
+        try {
+            await this.redis.del(prefix+id);
+        } catch (error) {
+            console.log("removeSession", error);
+        }
+    }
+
+    async findAllSessions() {
+        try {
+            const keys = await this.redis.keys(prefix+'*');
+            const sessions = await Promise.all(keys.map(key => this.redis.hgetall(key)));
+            return sessions;
+        } catch (error) {
+            console.log('findAllSession', error);
+            return [];
+        }
+    }
+
+    async updateSessionOnlineStatus(id, isOnline) {
+        try {
+            const session = await this.findSession(prefix+id);
+            if (session.userID)
+                await this.redis.hset(prefix+id, 'connected', isOnline);
+        } catch (error) {
+            console.log("updateSessionOnlineStatus", error);
+        }
+    }
+
+    async updateSessionlastSeen(id, lastSeen) {
+        try {
+            const session = await this.findSession(prefix+id);
+            if (session.userID)
+                await this.redis.hset(prefix+id, 'lastSeen', lastSeen);
+        } catch (error) {
+            console.log("updateSessionlastSeen", error);
         }
     }
 }
