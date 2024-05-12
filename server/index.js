@@ -44,7 +44,7 @@ const messageStore = new MessageStore();
 const randomId = () => crypto.randomBytes(8).toString("hex");
 
 io.use(async (socket, next) => {
-    const { username, sessionID } = socket.handshake.auth;
+    const { username, sessionID, userID } = socket.handshake.auth;
     if (sessionID) {
         // find existing session
         const session = await sessionStore.findSession(sessionID);
@@ -60,7 +60,7 @@ io.use(async (socket, next) => {
     }
     // create new session
     socket.sessionID = randomId();
-    socket.userID = randomId();
+    socket.userID = userID;
     socket.username = username;
     next();
 });

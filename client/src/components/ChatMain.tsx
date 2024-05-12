@@ -1,13 +1,14 @@
 // ChatMain.tsx
-import React, {  useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { addMessage, clearUnseenMessagesIds, pushUnseenMessagesIds, selectMessages, selectUnseenMessages, updateMessages } from '../store/messagesSlice';
+import { addMessage, clearUnseenMessagesIds, fetchMessages, pushUnseenMessagesIds, selectMessages, selectUnseenMessages, updateMessages } from '../store/messagesSlice';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import socket from '../socket';
 import { randomId } from '../utils';
 import { MESSAGE_DELIVERED, MESSAGE_SEEN, MESSAGE_SENT, Message, PRIVATE_MESSAGE, users } from '../utils/types';
 import Header from './Header';
+import { deleteUnseenMessage, saveMessage, saveUnseenMessage, updateMessage } from '../services/database';
 
 interface ChatMainProps {
   user: users;
@@ -18,29 +19,36 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
   const dispatch = useDispatch();
   const messages = useSelector(selectMessages);
   const unseenMessages = useSelector(selectUnseenMessages);
-  const userID = localStorage.getItem('userID');
+  const userID = localStorage.getItem('userID') || '';
 
-  const handleSend = (message: string) => {
+  const handleSend = async (message: string) => {
     if (!message) return;
     const newMessage: Message = {
-      id: randomId(),
+      id: Date.now().toString(),
       content: message,
       from: userID,
       to: user?.userID,
-      seen: undefined
+      seen: 'message sending'
     };
+    await saveMessage(user.userID, newMessage);
     dispatch(addMessage({ userID: user.userID, message: newMessage }));
     socket.emit(PRIVATE_MESSAGE, {
       content: message,
       to: user?.userID,
       id: newMessage.id,
-      from: userID
+      from: userID,
+      seen: 'message sending'
     });
   };
 
   useEffect(() => {
+    dispatch(fetchMessages(user?.userID))
+  }, [])
+
+  useEffect(() => {
     if (unseenMessages[user.userID]) {
-      unseenMessages[user.userID].forEach((message) => {
+      unseenMessages[user.userID].forEach(async (message) => {
+        await deleteUnseenMessage(message.id);
         socket.emit(MESSAGE_SEEN, { messageID: message.id, from: message.to, to: message.from });
         dispatch(clearUnseenMessagesIds({ userID: user.userID, messageID: message.id }));
       })
@@ -48,9 +56,8 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
   }, [user])
 
   useEffect(() => {
-    localStorage.setItem('chats', JSON.stringify(messages));
 
-    socket.on(PRIVATE_MESSAGE, ({ content, from, to, id }) => {
+    socket.on(PRIVATE_MESSAGE, async ({ content, from, to, id }) => {
       const newMessage: Message = {
         id: id,
         content: content,
@@ -63,30 +70,27 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
         socket.emit(MESSAGE_SEEN, { messageID: id, from: to, to: from });
       }
       else {
+        await saveUnseenMessage(newMessage);
         dispatch(pushUnseenMessagesIds({ userID: from, message: newMessage }));
-        localStorage.setItem('unseen_chats', JSON.stringify(unseenMessages));
       }
     });
 
-    socket.on(MESSAGE_SENT, ({ messageID, to }) => {
-      setTimeout(() => {
-        dispatch(updateMessages({ userID: to || '', messageID: messageID, value: MESSAGE_SENT }))
-      }, 1000);
+    socket.on(MESSAGE_SENT, async ({ messageID, to }) => {
+      await updateMessage(to, messageID, MESSAGE_SENT);
+      dispatch(updateMessages({ userID: to || '', messageID: messageID, value: MESSAGE_SENT }))
     })
 
-    socket.on(MESSAGE_DELIVERED, ({ messageID, to, from }) => {
+    socket.on(MESSAGE_DELIVERED, async ({ messageID, to, from }) => {
       if (to === userID) {
-        setTimeout(() => {
-          dispatch(updateMessages({ userID: from, messageID: messageID, value: MESSAGE_DELIVERED }))
-        }, 2000);
+        await updateMessage(from, messageID, MESSAGE_DELIVERED);
+        dispatch(updateMessages({ userID: from, messageID: messageID, value: MESSAGE_DELIVERED }))
       }
     })
 
-    socket.on(MESSAGE_SEEN, ({ messageID, to, from }) => {
+    socket.on(MESSAGE_SEEN, async ({ messageID, to, from }) => {
       if (to === userID) {
-        setTimeout(() => {
-          dispatch(updateMessages({ userID: from, messageID: messageID, value: MESSAGE_SEEN }))
-        }, 3000);
+        await updateMessage(from, messageID, MESSAGE_SEEN);
+        dispatch(updateMessages({ userID: from, messageID: messageID, value: MESSAGE_SEEN }))
       }
     })
 
@@ -96,7 +100,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
       socket.off(MESSAGE_DELIVERED);
       socket.off(MESSAGE_SEEN);
     };
-    
+
   }, [dispatch, messages, user]);
 
   return (
@@ -104,7 +108,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
       <Header setSelectedUser={setSelectedUser} user={user} />
       <div className="flex-grow p-4 overflow-y-auto">
         {messages[user?.userID] && messages[user?.userID].map(msg => (
-          <ChatMessage key={msg.id} seen={msg.seen || undefined} message={msg.content} isSender={msg.from === userID} />
+          <ChatMessage key={msg.id} seen={msg?.seen} message={msg.content} isSender={msg.from === userID} />
         ))}
       </div>
       <ChatInput onSend={handleSend} from={userID} to={user.userID} />

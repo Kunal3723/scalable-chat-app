@@ -33,7 +33,6 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, from, to }) => {
         socket.emit(SEND_TYPING_STATUS, { from, to, status: false });
       setTyping(false);
       setMessage('');
-      console.log(timer);
       clearTimeout(timer); // Clear the timeout if the component unmounts
     };
   }, []);

@@ -7,6 +7,9 @@ import { MESSAGE_DELIVERED, Message, PRIVATE_MESSAGE, SEND_ALL_UNSENT_MESSAGES, 
 import { useDispatch, useSelector } from 'react-redux';
 import { addAllUsers, addUser, selectUsers, updateLastSeen, updateOnlineStatus } from '../store/usersSlice';
 import { addMessage, pushUnseenMessagesIds, selectMessages, selectUnseenMessages } from '../store/messagesSlice';
+import { auth } from '../firebase';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { saveUnseenMessage } from '../services/database';
 
 const Chat = () => {
     const navigate = useNavigate();
@@ -15,16 +18,17 @@ const Chat = () => {
     const [selectedUser, setSelectedUser] = useState<users | null>(null);
     const unseenMessages = useSelector(selectUnseenMessages);
     const messages = useSelector(selectMessages);
+    const [user] = useAuthState(auth);
 
     useEffect(() => {
-        const username = localStorage.getItem('username');
-        if (!username) {
+        if (!user) {
             navigate('/');
         }
         else {
             const sessionID = localStorage.getItem('sessionID');
             const authenticationData = {
-                username: username,
+                username: user.displayName,
+                userID: user.uid,
                 sessionID: sessionID
             };
             socket.auth = authenticationData
@@ -37,7 +41,7 @@ const Chat = () => {
                     dispatch(addAllUsers({ users, userID }))
                 })
             });
-            socket.on(SEND_ALL_UNSENT_MESSAGES, ({ content, from, to, id }) => {
+            socket.on(SEND_ALL_UNSENT_MESSAGES, async ({ content, from, to, id }) => {
                 const newMessage: Message = {
                     id: id,
                     content: content,
@@ -45,11 +49,9 @@ const Chat = () => {
                     to: to
                 };
                 socket.emit(MESSAGE_DELIVERED, { messageID: id, to: from, from: to });
+                await saveUnseenMessage(newMessage);
                 dispatch(addMessage({ userID: from, message: newMessage }));
-                // dispatch(updateUnreadMessageStatus({ userID: from, status: 1 }));
                 dispatch(pushUnseenMessagesIds({ userID: from, message: newMessage }));
-                console.log(unseenMessages);
-                localStorage.setItem('unseen_chats', JSON.stringify(unseenMessages));
             })
         }
         return () => {
@@ -59,10 +61,8 @@ const Chat = () => {
     }, [])
 
     useEffect(() => {
-        localStorage.setItem('unseen_chats', JSON.stringify(unseenMessages));
-        localStorage.setItem('chats', JSON.stringify(messages));
         if (!selectedUser) {
-            socket.on(PRIVATE_MESSAGE, ({ content, from, to, id }) => {
+            socket.on(PRIVATE_MESSAGE, async ({ content, from, to, id }) => {
                 const newMessage: Message = {
                     id: id,
                     content: content,
@@ -70,6 +70,7 @@ const Chat = () => {
                     to: to
                 };
                 socket.emit(MESSAGE_DELIVERED, { messageID: id, to: from, from: to });
+                await saveUnseenMessage( newMessage);
                 dispatch(addMessage({ userID: from, message: newMessage }));
                 dispatch(pushUnseenMessagesIds({ userID: from, message: newMessage }));
             });
@@ -82,7 +83,6 @@ const Chat = () => {
 
     useEffect(() => {
         socket.on(USER_CONNECTED, (user: users) => {
-            console.log("user connected called");
             if (user.userID !== (localStorage.getItem('userID') || '')) {
                 dispatch(addUser({ user }));
                 dispatch(updateOnlineStatus({ userID: user.userID, status: true }));
@@ -90,7 +90,6 @@ const Chat = () => {
         })
 
         socket.on(USER_DISCONNECTED, (user: users) => {
-            // console.log();
             dispatch(updateOnlineStatus({ userID: user.userID, status: false }));
             dispatch(updateLastSeen({ userID: user.userID, lastSeen: user.lastSeen }));
         })
