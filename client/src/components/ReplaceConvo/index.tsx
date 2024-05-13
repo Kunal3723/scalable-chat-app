@@ -11,7 +11,7 @@ import {
     VStack,
     Text,
 } from '@chakra-ui/react'
-import {  useState } from 'react'
+import { useState } from 'react'
 import PopupBody from './PopupBody';
 import { useDispatch } from 'react-redux';
 import { fetchMessages, setChat } from '../../store/messagesSlice';
@@ -45,7 +45,7 @@ const Popup = ({ isOpen, onClose, userID }: Props) => {
                     <DrawerBody>
                         <VStack alignItems={'flex-start'}>
                             <Text textAlign={'left'} fontSize={'md'}>Enter password to move ahead</Text>
-                            <Input value={password} placeholder='Enter password' onChange={(e) => setPassword(e.target.value)} />
+                            <Input type='password' value={password} placeholder='Enter password' onChange={(e) => setPassword(e.target.value)} />
                             <Button colorScheme='blue' size='sm' onClick={() => {
                                 if (password === '123456') setFlag(true)
                             }}>Done</Button>
@@ -70,6 +70,8 @@ const Popup = ({ isOpen, onClose, userID }: Props) => {
                             }
                             localStorage.setItem('Type', JSON.stringify({ [userID]: value }));
                             onClose();
+                            setPassword('');
+                            setFlag(false);
                         }
                         }>Save</Button>
                     </DrawerFooter>
