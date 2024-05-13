@@ -1,11 +1,12 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { InMemorySessionStore } from "./sessionStore.js";
+import { RedisSessionStore } from "./stores/sessionStore.js";
 import crypto from 'crypto';
-import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./types.js";
-import { MessageStore } from "./messageStore.js";
+import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./constants.js";
+import { MessageStore } from "./stores/messageStore.js";
 import { Redis } from "ioredis";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 const app = express();
 const server = http.createServer(app);
@@ -16,30 +17,36 @@ const io = new Server(server, {
     }
 });
 
-const pub = new Redis({
-    host: 'redis-3ef71560-dtom7628-12a0.a.aivencloud.com',
-    password: 'AVNS_60F23DRcodnrbSyeQ_i',
-    port: 26911,
-    username: 'default'
+const pub = new Redis();
+const sub = pub.duplicate();
+
+pub.on("error", (err) => {
+    console.log(err.message);
 });
 
-const sub = new Redis({
-    host: 'redis-3ef71560-dtom7628-12a0.a.aivencloud.com',
-    password: 'AVNS_60F23DRcodnrbSyeQ_i',
-    port: 26911,
-    username: 'default'
+sub.on("error", (err) => {
+    console.log(err.message);
 });
 
-const sessionStore = new InMemorySessionStore();
+const init = () => {
+    try {
+        io.adapter(createAdapter(pub, sub));
+    } catch (error) {
+        console.log("error 48", error);
+    }
+}
+init();
+
+const sessionStore = new RedisSessionStore();
 const messageStore = new MessageStore();
 const randomId = () => crypto.randomBytes(8).toString("hex");
 
-io.use((socket, next) => {
-    const { username, sessionID } = socket.handshake.auth;
+io.use(async (socket, next) => {
+    const { username, sessionID, userID } = socket.handshake.auth;
     if (sessionID) {
         // find existing session
-        const session = sessionStore.findSession(sessionID);
-        if (session) {
+        const session = await sessionStore.findSession(sessionID);
+        if (session.userID) {
             socket.sessionID = sessionID;
             socket.userID = session.userID;
             socket.username = session.username;
@@ -51,15 +58,15 @@ io.use((socket, next) => {
     }
     // create new session
     socket.sessionID = randomId();
-    socket.userID = randomId();
+    socket.userID = userID;
     socket.username = username;
     next();
 });
 
-io.on(CONNECTION,async (socket) => {
-
-    if (!sessionStore.findSession(socket.sessionID)) {
-        sessionStore.saveSession(socket.sessionID, {
+io.on(CONNECTION, async (socket) => {
+    const session = await sessionStore.findSession(socket.sessionID);
+    if (!session.userID) {
+        await sessionStore.saveSession(socket.sessionID, {
             userID: socket.userID,
             username: socket.username,
             connected: true,
@@ -67,35 +74,27 @@ io.on(CONNECTION,async (socket) => {
         });
     }
     else {
-        sessionStore.updateSessionOnlineStatus(socket.sessionID, true);
-        sessionStore.updateSessionlastSeen(socket.sessionID, Date.now());
-        const messages = messageStore.getMessages(socket.userID);
-        if (messages) {
-            messages.forEach((msg) => {
-                console.log(msg);
+        await sessionStore.updateSessionOnlineStatus(socket.sessionID, true);
+        await sessionStore.updateSessionlastSeen(socket.sessionID, Date.now());
+        const messages = await messageStore.getMessages(socket.userID);
+        if (messages.length) {
+            messages.forEach(async (msg) => {
                 socket.emit(SEND_ALL_UNSENT_MESSAGES, msg);
-                messageStore.removeMessage(msg.id);
+                await messageStore.removeMessage(socket.userID);
             })
         }
     }
 
-    // no redis
     socket.emit(SESSION, {
         sessionID: socket.sessionID,
         userID: socket.userID,
     });
 
-    sub.subscribe(PRIVATE_MESSAGE);
-    sub.subscribe(MESSAGE_DELIVERED);
-    sub.subscribe(MESSAGE_SEEN);
-    sub.subscribe(SEND_TYPING_STATUS);
-    sub.subscribe(USER_DISCONNECTED);
-    sub.subscribe(USER_CONNECTED);
-
     socket.join(socket.userID);
 
     const users = [];
-    sessionStore.findAllSessions().forEach((session) => {
+    const sessions = await sessionStore.findAllSessions();
+    sessions.forEach((session) => {
         users.push({
             userID: session.userID,
             username: session.username,
@@ -103,15 +102,7 @@ io.on(CONNECTION,async (socket) => {
             lastSeen: session.lastSeen
         });
     });
-    // no redis
     socket.emit(USERS, users);
-
-    await pub.publish(USER_CONNECTED, JSON.stringify({
-        userID: socket.userID,
-        username: socket.username,
-        connected: true,
-        lastSeen: Date.now()
-    }))
 
     socket.broadcast.emit(USER_CONNECTED, {
         userID: socket.userID,
@@ -121,84 +112,49 @@ io.on(CONNECTION,async (socket) => {
     });
 
     socket.on(PRIVATE_MESSAGE, async ({ content, to, id, from }) => {
-        //no redis
         socket.emit(MESSAGE_SENT, { messageID: id, to });
-        messageStore.addMessage({ id, content, from, to });
-        await pub.publish(PRIVATE_MESSAGE, JSON.stringify({
+        await messageStore.addMessage(to, { id, content, from, to });
+        socket.to(to).to(from).emit(PRIVATE_MESSAGE, {
             content,
             from: from,
             to,
             id: id
-        }))
+        });
     });
 
     socket.on(MESSAGE_DELIVERED, async ({ messageID, to, from }) => {
-        messageStore.removeMessage(messageID);
-        await pub.publish(MESSAGE_DELIVERED, JSON.stringify({
+        await messageStore.removeMessage(socket.userID);
+        socket.to(to).to(from).emit(MESSAGE_DELIVERED, {
             messageID, to, from
-        }))
+        });
     })
 
-    socket.on(MESSAGE_SEEN, async ({ messageID, to, from }) => {
-        await pub.publish(MESSAGE_SEEN, JSON.stringify({
+    socket.on(MESSAGE_SEEN, ({ messageID, to, from }) => {
+        socket.to(to).to(from).emit(MESSAGE_SEEN, {
             messageID, to, from
-        }))
+        });
     })
 
-    socket.on(SEND_TYPING_STATUS, async ({ from, to, status }) => {
-        await pub.publish(SEND_TYPING_STATUS, JSON.stringify({ from, to, status }))
+    socket.on(SEND_TYPING_STATUS, ({ from, to, status }) => {
+        socket.to(to).to(from).emit(SEND_TYPING_STATUS, { from, to, status })
     })
 
     socket.on(DISCONNECT, async () => {
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
         if (isDisconnected) {
-            sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
-            sessionStore.updateSessionlastSeen(socket.userID, Date.now());
-            const user = sessionStore.findSession(socket.sessionID);
-            await pub.publish(USER_DISCONNECTED, JSON.stringify({ user }))
-            sub.unsubscribe(PRIVATE_MESSAGE);
-            sub.unsubscribe(MESSAGE_DELIVERED);
-            sub.unsubscribe(MESSAGE_SEEN);
-            sub.unsubscribe(SEND_TYPING_STATUS);
-            sub.unsubscribe(USER_DISCONNECTED);
-            sub.unsubscribe(USER_CONNECTED);
+            await sessionStore.updateSessionOnlineStatus(socket.sessionID, false);
+            await sessionStore.updateSessionlastSeen(socket.userID, Date.now());
+            const user = await sessionStore.findSession(socket.sessionID);
+            socket.broadcast.emit(USER_DISCONNECTED, user);
         }
     });
 });
-
-sub.on('message', async (channel, message) => {
-    if (channel === PRIVATE_MESSAGE) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(PRIVATE_MESSAGE, msg);
-    }
-    else if (channel === MESSAGE_DELIVERED) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(MESSAGE_DELIVERED, msg);
-    }
-    else if (channel === MESSAGE_SEEN) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(MESSAGE_SEEN, msg);
-    }
-    else if (channel === SEND_TYPING_STATUS) {
-        const msg = JSON.parse(message);
-        io.to(msg.to).to(msg.from).emit(SEND_TYPING_STATUS, msg);
-    }
-    else if (channel === USER_DISCONNECTED) {
-        const msg = JSON.parse(message);
-        io.emit(USER_DISCONNECTED, msg.user);
-    }
-    else if (channel === USER_CONNECTED) {
-        const msg = JSON.parse(message);
-        if(msg.userID!==io.userID)
-        io.emit(USER_CONNECTED, msg);
-    }
-})
 
 app.get('/', (req, res) => {
     res.send('hello how are you?');
 })
 
-server.listen(3001, () => {
-    console.log("server started at port " + 3001);
+server.listen(process.env.PORT || 3001, () => {
+    console.log("server started at port " + process.env.PORT || 3001);
 })

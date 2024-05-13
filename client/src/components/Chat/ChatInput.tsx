@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import socket from '../socket';
-import { SEND_TYPING_STATUS } from '../utils/types';
+import socket from '../../socket';
+import { SEND_TYPING_STATUS } from '../../utils/types';
+import { Button, Flex, Input } from '@chakra-ui/react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -33,31 +34,46 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, from, to }) => {
         socket.emit(SEND_TYPING_STATUS, { from, to, status: false });
       setTyping(false);
       setMessage('');
-      console.log(timer);
       clearTimeout(timer); // Clear the timeout if the component unmounts
     };
   }, []);
 
+  const handleSend = () => {
+    onSend(message);
+    setMessage('');
+  };
+
   return (
-    <div className="flex items-center border-t border-gray-300 p-3">
-      <input
+    <Flex alignItems="center" borderTop="1px" borderColor="gray.300" p={3}>
+      <Input
         type="text"
         value={message}
         onChange={handleChange}
         placeholder="Type a message..."
-        onInput={handleTyping} // Directly passing the function reference
-        className="flex-grow border rounded-lg px-3 py-2 mr-2 focus:outline-none focus:ring focus:border-blue-300"
-      />
-      <button
-        onClick={() => {
-          onSend(message);
-          setMessage('');
+        onInput={handleTyping}
+        flex="1"
+        borderWidth="1px"
+        borderRadius="lg"
+        px={3}
+        py={2}
+        mr={2}
+        _focus={{
+          outline: 'none',
+          ring: '1px',
+          borderColor: 'blue.300',
         }}
-        className="bg-blue-500 text-white px-4 py-2 rounded-lg"
+      />
+      <Button
+        onClick={handleSend}
+        bg="blue.500"
+        color="white"
+        px={4}
+        py={2}
+        rounded="lg"
       >
         Send
-      </button>
-    </div>
+      </Button>
+    </Flex>
   );
 };
 
