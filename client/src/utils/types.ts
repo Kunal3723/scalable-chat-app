@@ -30,3 +30,7 @@ export interface users {
     lastSeen?: number;
     isTyping?: boolean
 }
+
+export interface MessagesState {
+    [userID: string]: Message[];
+}

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import UsernameSelector from './page/UsernameSelector'
+import UsernameSelector from './page/Login'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Chat from './page/Chat';
 import socket from './socket';

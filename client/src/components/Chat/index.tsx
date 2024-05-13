@@ -1,14 +1,15 @@
 // ChatMain.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { addMessage, clearUnseenMessagesIds, fetchMessages, pushUnseenMessagesIds, selectMessages, selectUnseenMessages, updateMessages } from '../store/messagesSlice';
+import { addMessage, clearUnseenMessagesIds, fetchMessages, pushUnseenMessagesIds, selectMessages, selectUnseenMessages, setChat, updateMessages } from '../../store/messagesSlice';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
-import socket from '../socket';
-import { randomId } from '../utils';
-import { MESSAGE_DELIVERED, MESSAGE_SEEN, MESSAGE_SENT, Message, PRIVATE_MESSAGE, users } from '../utils/types';
-import Header from './Header';
-import { deleteUnseenMessage, saveMessage, saveUnseenMessage, updateMessage } from '../services/database';
+import socket from '../../socket';
+import { MESSAGE_DELIVERED, MESSAGE_SEEN, MESSAGE_SENDING, MESSAGE_SENT, Message, PRIVATE_MESSAGE, users } from '../../utils/types';
+import Header from '../Header';
+import { deleteUnseenMessage, saveMessage, saveUnseenMessage, updateMessage } from '../../services/database'; import { arr } from '../../utils';
+import { Box, Flex, VStack } from '@chakra-ui/react';
+import useScrollToBottom from '../../customHooks/useScrollToBottom';
 
 interface ChatMainProps {
   user: users;
@@ -20,6 +21,8 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
   const messages = useSelector(selectMessages);
   const unseenMessages = useSelector(selectUnseenMessages);
   const userID = localStorage.getItem('userID') || '';
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useScrollToBottom(messagesEndRef);
 
   const handleSend = async (message: string) => {
     if (!message) return;
@@ -28,7 +31,7 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
       content: message,
       from: userID,
       to: user?.userID,
-      seen: 'message sending'
+      seen: MESSAGE_SENDING
     };
     await saveMessage(user.userID, newMessage);
     dispatch(addMessage({ userID: user.userID, message: newMessage }));
@@ -37,12 +40,21 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
       to: user?.userID,
       id: newMessage.id,
       from: userID,
-      seen: 'message sending'
+      seen: MESSAGE_SENDING
     });
   };
 
   useEffect(() => {
-    dispatch(fetchMessages(user?.userID))
+    const type = JSON.parse(localStorage.getItem('Type') || '{}');
+    if (type[user?.userID]) {
+      if (type[user?.userID] === 'Original')
+        dispatch(fetchMessages(user?.userID))
+      else dispatch(setChat({ userID: user.userID, chat: arr[type[user?.userID]] }));
+    }
+    else {
+      dispatch(fetchMessages(user?.userID))
+    }
+
   }, [])
 
   useEffect(() => {
@@ -104,15 +116,16 @@ const ChatMain: React.FC<ChatMainProps> = ({ user, setSelectedUser }) => {
   }, [dispatch, messages, user]);
 
   return (
-    <div key={user.userID} className="flex flex-col h-full">
+    <Flex h='full' flexDir='column' key={user.userID}>
       <Header setSelectedUser={setSelectedUser} user={user} />
-      <div className="flex-grow p-4 overflow-y-auto">
+      <Flex flexDir='column' flexGrow={1} p={2} overflowY='auto'>
         {messages[user?.userID] && messages[user?.userID].map(msg => (
           <ChatMessage key={msg.id} seen={msg?.seen} message={msg.content} isSender={msg.from === userID} />
         ))}
-      </div>
+        <div ref={messagesEndRef} />
+      </Flex>
       <ChatInput onSend={handleSend} from={userID} to={user.userID} />
-    </div>
+    </Flex>
   );
 };
 

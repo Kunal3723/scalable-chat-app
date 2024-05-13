@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import socket from '../socket';
 import Sidebar from '../components/Sidebar';
-import ChatMain from '../components/ChatMain';
+import ChatMain from '../components/Chat';
 import { MESSAGE_DELIVERED, Message, PRIVATE_MESSAGE, SEND_ALL_UNSENT_MESSAGES, SESSION, USERS, USER_CONNECTED, USER_DISCONNECTED, users } from '../utils/types';
 import { useDispatch, useSelector } from 'react-redux';
 import { addAllUsers, addUser, selectUsers, updateLastSeen, updateOnlineStatus } from '../store/usersSlice';
@@ -10,6 +10,8 @@ import { addMessage, pushUnseenMessagesIds, selectMessages, selectUnseenMessages
 import { auth } from '../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { saveUnseenMessage } from '../services/database';
+import { Box, Flex } from '@chakra-ui/react';
+import React from 'react';
 
 const Chat = () => {
     const navigate = useNavigate();
@@ -70,7 +72,7 @@ const Chat = () => {
                     to: to
                 };
                 socket.emit(MESSAGE_DELIVERED, { messageID: id, to: from, from: to });
-                await saveUnseenMessage( newMessage);
+                await saveUnseenMessage(newMessage);
                 dispatch(addMessage({ userID: from, message: newMessage }));
                 dispatch(pushUnseenMessagesIds({ userID: from, message: newMessage }));
             });
@@ -101,13 +103,13 @@ const Chat = () => {
     }, [dispatch, userState])
 
     return (
-        <div className='flex w-full h-screen'>
+        <Flex w='full' h='100vh'>
             <Sidebar users={userState} setSelectedUser={setSelectedUser} />
-            {selectedUser ? <div className='w-full h-screen'>
+            {selectedUser ? <Box w='full' h='100vh'>
                 <ChatMain user={selectedUser} setSelectedUser={setSelectedUser} />
-            </div> : <div className='flex justify-center items-center w-full h-screen'>
-            </div>}
-        </div>
+            </Box> : <Flex w='full' h='100vh' justifyContent={'center'} alignItems={'center'}>
+            </Flex>}
+        </Flex>
     )
 }
 

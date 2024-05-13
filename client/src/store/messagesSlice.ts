@@ -1,20 +1,12 @@
 // messagesSlice.ts
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { RootState } from './store';
-import { Message } from '../utils/types';
+import { Message, MessagesState } from '../utils/types';
 import { getMessages, getUnseenMessages } from '../services/database';
-
-interface MessagesState {
-  [userID: string]: Message[];
-}
-
-export interface unseenMessagesState {
-  [userID: string]: Message[]
-}
 
 interface FinalState {
   value: MessagesState,
-  unseenMessagesIDs: unseenMessagesState
+  unseenMessagesIDs: MessagesState
 }
 
 const initialState: FinalState = { value: { 'userID': [] }, unseenMessagesIDs: { 'userID': [] } };
@@ -65,6 +57,23 @@ const messagesSlice = createSlice({
       const { userID, message } = action.payload;
       if (!state.value[userID]) state.value[userID] = [];
       state.value[userID] = [...state.value[userID], message];
+    },
+    setChat(state, action: PayloadAction<{ userID: string, chat: Message[] }>) {
+      const { userID, chat } = action.payload;
+      const newChat = [] as Message[];
+      const SuserID = localStorage.getItem('userID') || '';
+      chat.forEach((el, idx) => {
+        if (idx % 2) {
+          newChat.push({
+            ...el, from: SuserID, to: userID
+          })
+        } else {
+          newChat.push({
+            ...el, from: userID, to: SuserID
+          })
+        }
+      })
+      state.value[userID] = newChat;
     }
   },
   extraReducers: (builder) => {
@@ -81,7 +90,7 @@ const messagesSlice = createSlice({
   },
 });
 
-export const { updateMessages, addMessage, pushUnseenMessagesIds, clearUnseenMessagesIds } = messagesSlice.actions;
+export const { updateMessages, addMessage, setChat, pushUnseenMessagesIds, clearUnseenMessagesIds } = messagesSlice.actions;
 export const selectMessages = (state: RootState) => state.messages.value;
 export const selectUnseenMessages = (state: RootState) => state.messages.unseenMessagesIDs;
 export default messagesSlice.reducer;

@@ -1,10 +1,10 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { RedisSessionStore } from "./sessionStore.js";
+import { RedisSessionStore } from "./stores/sessionStore.js";
 import crypto from 'crypto';
-import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./types.js";
-import { MessageStore } from "./messageStore.js";
+import { MESSAGE_SEEN, PRIVATE_MESSAGE, SEND_TYPING_STATUS, SESSION, USERS, USER_DISCONNECTED, CONNECTION, DISCONNECT, MESSAGE_SENT, MESSAGE_DELIVERED, USER_CONNECTED, SEND_ALL_UNSENT_MESSAGES } from "./constants.js";
+import { MessageStore } from "./stores/messageStore.js";
 import { Redis } from "ioredis";
 import { createAdapter } from "@socket.io/redis-adapter";
 
@@ -35,8 +35,6 @@ const init = () => {
         console.log("error 48", error);
     }
 }
-
-
 init();
 
 const sessionStore = new RedisSessionStore();

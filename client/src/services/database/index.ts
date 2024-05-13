@@ -1,7 +1,6 @@
 import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../../firebase"
-import { Message } from "../../utils/types";
-import { unseenMessagesState } from "../../store/messagesSlice";
+import { Message, MessagesState } from "../../utils/types";
 
 export const saveMessage = async (RuserID: string, message: Message) => {
     try {
@@ -75,7 +74,7 @@ export const getUnseenMessages = async () => {
         const title = SuserID;
         const docRef = collection(doc(db, "unseenMessages", title), "message");
         const querySnapshot = await getDocs(docRef);
-        const res = { 'userID': [] } as unseenMessagesState;
+        const res = { 'userID': [] } as MessagesState;
         querySnapshot.forEach((doc) => {
             const data = doc.data() as Message;
             console.log(data);
