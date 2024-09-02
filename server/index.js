@@ -12,7 +12,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        allowedHeaders: ['*'],
         origin: "*",
     }
 });
@@ -111,6 +110,9 @@ io.on(CONNECTION, async (socket) => {
         lastSeen: Date.now()
     });
 
+    // u1 --> server 
+    
+
     socket.on(PRIVATE_MESSAGE, async ({ content, to, id, from }) => {
         socket.emit(MESSAGE_SENT, { messageID: id, to });
         await messageStore.addMessage(to, { id, content, from, to });
@@ -155,6 +157,6 @@ app.get('/', (req, res) => {
     res.send('hello how are you?');
 })
 
-server.listen(process.env.PORT || 3001, () => {
+server.listen(3001, () => {
     console.log("server started at port " + process.env.PORT || 3001);
 })
